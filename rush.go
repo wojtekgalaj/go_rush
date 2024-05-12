@@ -2,22 +2,25 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"os/exec"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func isExecutable(path string) bool {
 	info, err := os.Stat(path)
+
 	if err != nil {
 		return false
 	}
+
 	if (info.Mode() & 0111) == 0 {
 		return false
 	}
+
 	return true
 }
 
@@ -45,33 +48,31 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-
-	// these will be in function scope since they are accessed by various
-	// messages
-	var cmdIn io.WriteCloser
-	var cmdOut io.ReadCloser
-
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
-			cmdIn.Close()
 			return m, tea.Quit
 		case "up", "k":
 			m.cursor--
 		case "down", "j":
 			m.cursor++
+		case "d":
+			describe(m.execs[m.cursor].Name())
 		case "enter":
 			exePath := m.execs[m.cursor].Name()
 
-			cmd := exec.Command("./" + exePath)
+			executable, lookupErr := exec.LookPath("./" + exePath)
 
-			cmdIn, _ = cmd.StdinPipe()
-			cmdOut, _ = cmd.StdoutPipe()
+			if lookupErr != nil {
+				fmt.Println(lookupErr.Error())
+			}
 
-			cmdBytes, _ := io.ReadAll(cmdOut)
-			cmd.Start()
-			cmd.Wait()
+			execErr := syscall.Exec(executable, []string{exePath}, os.Environ())
+
+			if execErr != nil {
+				fmt.Println("The program has failed to run. Program's problem, not yours.")
+			}
 
 			fmt.Println("The progam has been run")
 			os.Exit(0)
@@ -92,7 +93,16 @@ func (m model) View() string {
 		s += fmt.Sprintf("%s%s\n", selMarker, f.Name())
 	}
 
+	s += "\n\n Press enter to run the program or d to add a description to it. Press q to quit."
+
 	return s
+}
+
+func describe(exeName string) {
+	// get description from standard in
+	var desc string
+	fmt.Scanln(&desc)
+	fmt.Println("Description added" + desc)
 }
 
 func main() {
